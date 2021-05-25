@@ -18,6 +18,19 @@ type SIDouble = SI.T Double Double
 
 type T = [SIDouble] -> [SIDouble]
 
+instance Graphic2D.Draw ([SIDouble] -> [SIDouble]) where
+  draw gf = foldr (Monoid.<>) Gloss.blank
+    [Gloss.line [(i, j), (i + gapX, j + gapY)] |
+      i <- map ((* drawUnit) . fromIntegral) [- unitsWidth .. unitsWidth],
+      j <- map ((* drawUnit) . fromIntegral) [- unitsHeight .. unitsHeight],
+      let [fx, fy] = map MassPoint.siToFrac $ gf [realToFrac i Vector.*> SI.meter, realToFrac j Vector.*> SI.meter],
+      let f = sqrt (fx ^ 2 + fy ^ 2),
+      let [gapX, gapY] = (gap * gapFunc f / f) Vector.*> [fx, fy]
+    ]
+    where
+    unitsWidth = ceiling $ fromIntegral (windowWidth `div` 2) / drawUnit :: Int
+    unitsHeight = ceiling $ fromIntegral (windowHeight `div` 2) / drawUnit :: Int
+
 gap :: Float
 gap = 30
 
@@ -32,23 +45,11 @@ windowHeight = 480
 drawUnit :: Float
 drawUnit = 40
 
-instance Graphic2D.Draw ([SIDouble] -> [SIDouble]) where
-  draw gf = foldr (Monoid.<>) Gloss.blank
-    [Gloss.line [(i, j), (i + gapX, j + gapY)] |
-      i <- map ((* drawUnit) . fromIntegral) [- unitsWidth .. unitsWidth],
-      j <- map ((* drawUnit) . fromIntegral) [- unitsHeight .. unitsHeight],
-      let [fx, fy] = map MassPoint.siToFrac $ gf [realToFrac i Vector.*> SI.meter, realToFrac j Vector.*> SI.meter],
-      let f = sqrt (fx ^ 2 + fy ^ 2),
-      let [gapX, gapY] = (gap * gapFunc f / f) Vector.*> [fx, fy]
-    ]
-    where
-    unitsWidth = ceiling $ fromIntegral (windowWidth `div` 2) / drawUnit :: Int
-    unitsHeight = ceiling $ fromIntegral (windowHeight `div` 2) / drawUnit :: Int
-
-
+-- | 重力定数
 gConst :: SIDouble
 gConst = 6.67430e-11 * SI.meter ^ 3 / (Unit.kilo * SI.gramm * SI.second ^ 2)
 
+-- | 質点の質量、位置から重力場を計算
 compute :: SIDouble -> [SIDouble] -> T
 compute m r1 r2
   | r1 == r2 = replicate (length r1) $ 0 * SI.meter / SI.second ^ 2
@@ -56,16 +57,14 @@ compute m r1 r2
   where
   r = r2 - r1
 
+-- | 質点から重力場を計算
 fromMassPoint :: MassPoint.T -> T
 fromMassPoint  m = compute (MassPoint._m m) (MassPoint._x m)
 
-forceMassPoint :: T -> MassPoint.T -> MassPoint.T
-forceMassPoint g m = MassPoint.force
-  (MassPoint._m m Vector.*> g (MassPoint._x m))
-  m
-
+-- | ベクトルの大きさを計算
 magnitude :: Algebraic.C a => [a] -> a
 magnitude = sqrt . sum1 . map (^ 2)
 
+-- | すべての位置において0ベクトルである重力場(n次元)
 zero :: Int -> T
 zero n = const $ replicate n (0 * SI.meter / SI.second ^ 2)
