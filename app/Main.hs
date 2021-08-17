@@ -2,7 +2,9 @@
 
 module Main where
 
+import qualified Algebra.Vector                   as Vector
 import qualified Data.Monoid                      as Monoid
+import qualified Data.Vector                      as V
 import qualified Debug.Trace                      as Trace
 import qualified Graphic2D
 import qualified Graphics.Gloss                   as Gloss
@@ -12,7 +14,9 @@ import qualified GravitationalField
 import qualified MassPoint
 import qualified Number.SI                        as SI
 import qualified Number.SI.Unit                   as Unit
+import qualified NumericExtend
 import           NumericPrelude
+
 
 type MassPoints = [MassPoint.T]
 -- ^ 質点群
@@ -20,7 +24,8 @@ type MassPoints = [MassPoint.T]
 data Model = Model {
   massPoints         :: MassPoints,
   gravitationalField :: GravitationalField.T,
-  userGravity        :: (Bool, (Float, Float))
+  userGravity        :: (Bool, (Float, Float)),
+  massTrace          :: [[(Float, Float)]]
   }
 -- ^ モデル
 
@@ -57,12 +62,16 @@ initModel :: Model
 initModel = Model {
   massPoints = initMps,
   gravitationalField = GravitationalField.zero 2,
-  userGravity = initUserGravity
+  userGravity = initUserGravity,
+  massTrace = []
   }
+
+drawMassTrace :: [[(Float, Float)]] -> Gloss.Picture
+drawMassTrace = foldr ((Monoid.<>) .  Gloss.line) Gloss.blank
 
 -- | モデルを描画
 drawModel :: Model -> Gloss.Picture
-drawModel model = Gloss.color (Gloss.greyN 0.5) (Graphic2D.draw gf) Monoid.<> drawMassPoints mp Monoid.<>
+drawModel model = Gloss.color (Gloss.greyN 0.4) (drawMassTrace mt) Monoid.<> Gloss.color (Gloss.greyN 0.6) (Graphic2D.draw gf) Monoid.<> drawMassPoints mp Monoid.<>
   if isUserGrav
     then Gloss.translate x y (Gloss.circle 10)
     else Gloss.blank
@@ -70,6 +79,7 @@ drawModel model = Gloss.color (Gloss.greyN 0.5) (Graphic2D.draw gf) Monoid.<> dr
   mp = massPoints model
   ug = userGravity model
   gf = gravitationalField model
+  mt = massTrace model
   (isUserGrav, (x, y)) = ug
 
 -- | モデルを更新
@@ -77,24 +87,27 @@ updateModel :: Float -> Model -> Model
 updateModel t model = model {
   massPoints = mps'',
   gravitationalField = gf'',
-  userGravity = ug
+  userGravity = ug,
+  massTrace = mt'
   }
   where
+  mt = massTrace model
   mps = massPoints model
-  mps' = deleteOutWindowMps mps
   gf = gravitationalField model
   ug = userGravity model
+  mps' = deleteOutWindowMps mps
   mps'' = map (\mp ->
       MassPoint.updateLF (realToFrac t * SI.second) (gf'' (MassPoint._x mp)) mp
     )
     mps'
-  gf' = sum . map GravitationalField.fromMassPoint $ mps
+  gf' = foldr ((+) . GravitationalField.fromMassPoint) (GravitationalField.zero 2) mps
   gf'' = gf' + userGF
   (isUserGrav, (x, y)) = ug
   userGF = if isUserGrav
-    then GravitationalField.compute userMass
-      [realToFrac x * SI.meter, realToFrac y * SI.meter]
+    then GravitationalField.compute userMass $
+      V.fromList [realToFrac x * SI.meter, realToFrac y * SI.meter]
     else GravitationalField.zero 2
+  mt' = zipWith (\mp tr -> (NumericExtend.siToFrac $ MassPoint._x mp V.! 0, NumericExtend.siToFrac $ MassPoint._x mp V.! 1) : tr) mps'' mt
 
 -- updateModel :: p1 -> p2 -> a -> a
 -- updateModel _ _ = id
@@ -108,12 +121,13 @@ userUpdate (
   Gloss.Up _ (x, y)
   )
   model = model {
-  massPoints = (MassPoint.zeros 2) {
-    MassPoint._x = [realToFrac x * SI.meter, realToFrac y * SI.meter],
-    MassPoint._m = defaultMass
+    massPoints = (MassPoint.zeros 2) {
+      MassPoint._x = V.fromList [realToFrac x * SI.meter, realToFrac y * SI.meter],
+      MassPoint._m = defaultMass
+      }
+    : massPoints model,
+    massTrace = [] : massTrace model
     }
-    : massPoints model
-  }
 userUpdate (
   Gloss.EventKey
   (Gloss.MouseButton Gloss.RightButton)
@@ -142,7 +156,9 @@ deleteOutWindowMps = filter (not . f)
   where
   f mp = outOfWindowHeight y || outOfWindowWidth x
     where
-    [x, y] = map MassPoint.siToFrac . MassPoint._x $ mp
+    v = V.map NumericExtend.siToFrac . MassPoint._x $ mp
+    x = v V.! 0
+    y = v V.! 1
 
 -- ここら辺の設定はJSONでできるようにしたい
 windowWidth, windowHeight :: Int
